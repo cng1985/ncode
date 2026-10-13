@@ -3,8 +3,10 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Bell, Briefcase, CircleCheck, Close, Connection, Document, Folder, House, Plus, Reading, Search, User } from '@element-plus/icons-vue'
 import { api } from './api'
+import AuthView from './components/AuthView.vue'
 import WorkbenchView from './components/WorkbenchView.vue'
 import ProjectView from './components/ProjectView.vue'
+import RepositoryView from './components/RepositoryView.vue'
 import ModulePlaceholder from './components/ModulePlaceholder.vue'
 
 const navItems = [
@@ -19,6 +21,9 @@ const mobileNav = [...navItems.slice(0, 4), { label: '我的', icon: User }]
 const projects = ref([])
 const workItems = ref([])
 const activities = ref([])
+const authenticated = ref(false)
+const authChecking = ref(true)
+const account = ref(null)
 const loading = ref(true)
 const loadError = ref('')
 const activeView = ref('工作台')
@@ -97,6 +102,7 @@ async function refresh() {
     workItems.value = workPages.flatMap((result) => result.data).sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999'))
   } catch (error) {
     loadError.value = error.message
+    if (error.status === 401) authenticated.value = false
   } finally {
     loading.value = false
   }
@@ -257,11 +263,100 @@ function activityAction(action) {
   return ({ CREATED: '创建了工作项', UPDATED: '更新了工作项', READY: '将工作项设为就绪', START: '开始处理工作项', REQUEST_REVIEW: '提交了评审', MARK_ACCEPTANCE_PENDING: '标记为待验收', ACCEPTED: '完成了工作项验收', REOPEN: '重新打开工作项', CANCEL: '取消了工作项' })[action] || action
 }
 
-onMounted(refresh)
+async function initializeAuth() {
+  authChecking.value = true
+  try {
+    const result = await api.me()
+    account.value = result.data
+    api.setWorkspace(result.data.currentWorkspaceId)
+    authenticated.value = true
+    await refresh()
+  } catch {
+    authenticated.value = false
+  } finally {
+    authChecking.value = false
+  }
+}
+
+async function completeAuthentication() {
+  try {
+    const result = await api.me()
+    account.value = result.data
+    api.setWorkspace(result.data.currentWorkspaceId)
+    authenticated.value = true
+    await refresh()
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
+}
+
+async function switchWorkspace(id) {
+  api.setWorkspace(id)
+  if (account.value) account.value.currentWorkspaceId = Number(id)
+  selectedProjectId.value = null
+  await refresh()
+}
+
+async function createWorkspace() {
+  try {
+    const result = await ElMessageBox.prompt('为新的团队空间输入名称。', '创建工作空间', { inputPlaceholder: '例如：产品研发组', inputValidator: (value) => Boolean(value?.trim()) || '请输入空间名称' })
+    const created = await api.createWorkspace({ name: result.value.trim() })
+    account.value.workspaces.push(created.data)
+    await switchWorkspace(created.data.id)
+    ElMessage.success('工作空间已创建')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(error.message)
+  }
+}
+
+async function inviteWorkspaceMember() {
+  try {
+    const result = await ElMessageBox.prompt('输入对方注册 NCode 时使用的邮箱。邀请有效期为 7 天。', '邀请成员', { inputPlaceholder: 'name@example.com', inputType: 'email', inputValidator: (value) => /.+@.+\..+/.test(value || '') || '请输入有效邮箱' })
+    const invitation = await api.createWorkspaceInvite({ email: result.value.trim() })
+    await ElMessageBox.alert(`请通过安全渠道把这段一次性令牌交给 ${invitation.data.email}：\n\n${invitation.data.developmentInvitationToken}\n\n令牌仅能由该邮箱已验证的账号兑换。`, '邀请已创建', { confirmButtonText: '知道了' })
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(error.message)
+  }
+}
+
+async function acceptWorkspaceInvitation() {
+  try {
+    const result = await ElMessageBox.prompt('粘贴空间管理员提供的一次性邀请令牌。', '接受邀请', { inputPlaceholder: '邀请令牌' })
+    const membership = await api.acceptWorkspaceInvite(result.value.trim())
+    const workspace = membership.data
+    if (!account.value.workspaces.some((item) => item.id === workspace.id)) account.value.workspaces.push(workspace)
+    await switchWorkspace(workspace.id)
+    ElMessage.success(`已加入「${workspace.name}」`)
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(error.message)
+  }
+}
+
+function accountCommand(command) {
+  if (command === 'create') return createWorkspace()
+  if (command === 'invite') return inviteWorkspaceMember()
+  if (command === 'accept') return acceptWorkspaceInvitation()
+  return logout()
+}
+
+async function logout() {
+  try { await api.logout() } catch { /* The local session is cleared even when the server is unavailable. */ }
+  authenticated.value = false
+  account.value = null
+  api.setWorkspace(null)
+  projects.value = []
+  workItems.value = []
+  selectedItem.value = null
+  detailDrawer.value = false
+}
+
+onMounted(initializeAuth)
 </script>
 
 <template>
-  <div class="app-shell">
+  <div v-if="authChecking" class="auth-loading" role="status">正在安全地连接你的空间…</div>
+  <AuthView v-else-if="!authenticated" @authenticated="completeAuthentication" />
+  <div v-else class="app-shell">
     <aside class="sidebar">
       <div class="brand-lockup"><span class="brand-symbol">N</span><span>NCode</span></div>
       <nav class="side-nav" aria-label="主导航">
@@ -269,7 +364,7 @@ onMounted(refresh)
           <el-icon><component :is="item.icon" /></el-icon><span>{{ item.label }}</span>
         </button>
       </nav>
-      <div class="sidebar-bottom"><span class="workspace-dot"></span><span>个人空间</span></div>
+      <div class="sidebar-bottom"><span class="workspace-dot"></span><span>{{ account?.workspaces?.find((workspace) => workspace.id === account.currentWorkspaceId)?.name || '工作空间' }}</span></div>
     </aside>
 
     <div class="main-column">
@@ -284,7 +379,18 @@ onMounted(refresh)
             <template #reference><button class="icon-button" aria-label="通知"><el-icon><Bell /></el-icon></button></template>
             <div class="notification-empty"><strong>暂无新通知</strong><span>项目动态和评审消息会显示在这里。</span></div>
           </el-popover>
-          <button class="avatar" aria-label="个人空间">N</button>
+          <el-select class="workspace-select" :model-value="account?.currentWorkspaceId" aria-label="切换工作空间" @change="switchWorkspace">
+            <el-option v-for="workspace in account?.workspaces || []" :key="workspace.id" :label="workspace.name" :value="workspace.id" />
+          </el-select>
+          <el-dropdown @command="accountCommand">
+            <button class="avatar" :aria-label="`${account?.name || '用户'}的账户菜单`">{{ account?.name?.slice(0, 1) || 'N' }}</button>
+            <template #dropdown><el-dropdown-menu>
+              <el-dropdown-item command="create">创建工作空间</el-dropdown-item>
+              <el-dropdown-item v-if="['owner', 'admin'].includes(account?.workspaces?.find((workspace) => workspace.id === account.currentWorkspaceId)?.role)" command="invite">邀请成员</el-dropdown-item>
+              <el-dropdown-item command="accept">接受邀请</el-dropdown-item>
+              <el-dropdown-item divided command="logout">退出登录</el-dropdown-item>
+            </el-dropdown-menu></template>
+          </el-dropdown>
         </div>
       </header>
 
@@ -305,6 +411,7 @@ onMounted(refresh)
         @select="selectedProjectId = $event" @create-project="openProjectDialog"
         @create-work-item="openCreateWorkItem" @open-item="openItem"
       />
+      <RepositoryView v-else-if="activeView === '仓库'" :projects="projects" @create-project="openProjectDialog" />
       <ModulePlaceholder v-else :title="activeView" />
     </div>
 
@@ -322,7 +429,7 @@ onMounted(refresh)
       <el-form-item label="项目目标"><el-input v-model="projectForm.goal" type="textarea" :rows="3" maxlength="500" placeholder="描述这个项目要完成的目标" /></el-form-item>
       <div class="form-two-columns">
         <el-form-item label="项目类型"><el-select v-model="projectForm.type"><el-option label="产品项目" value="product" /><el-option label="学习项目" value="learning" /><el-option label="开源项目" value="open_source" /><el-option label="团队项目" value="team" /></el-select></el-form-item>
-        <el-form-item label="可见范围"><el-select v-model="projectForm.visibility"><el-option label="私有" value="private" /><el-option label="组织内" value="internal" /><el-option label="公开" value="public" /></el-select></el-form-item>
+        <el-form-item label="可见范围"><div class="visibility-field"><el-tag effect="plain">工作区内可见</el-tag><p class="form-help">当前项目仅对当前工作区成员开放。</p></div></el-form-item>
       </div>
       <div class="dialog-actions"><el-button @click="projectDialog = false">取消</el-button><el-button type="primary" :loading="projectBusy" :disabled="!projectForm.name.trim() || !projectForm.slug.trim()" @click="createProject">创建项目</el-button></div>
     </el-form>

@@ -51,13 +51,7 @@ func registerMigrations(lifecycle fx.Lifecycle, db *gorm.DB, cfg config.Config) 
 	lifecycle.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			db = db.WithContext(ctx)
-			if err := db.AutoMigrate(
-				&model.Project{},
-				&model.WorkItem{},
-				&model.AcceptanceCriterion{},
-				&model.Activity{},
-				&model.IdempotencyRecord{},
-			); err != nil {
+			if err := Migrate(db); err != nil {
 				return fmt.Errorf("run database migrations: %w", err)
 			}
 			if cfg.SeedDemo {
@@ -68,4 +62,31 @@ func registerMigrations(lifecycle fx.Lifecycle, db *gorm.DB, cfg config.Config) 
 			return nil
 		},
 	})
+}
+
+// Migrate applies the current schema and removes the pre-workspace global
+// project slug index. Slugs are unique inside a workspace.
+func Migrate(db *gorm.DB) error {
+	if err := db.AutoMigrate(
+		&model.User{},
+		&model.Tenant{},
+		&model.Membership{},
+		&model.WorkspaceInvitation{},
+		&model.EmailVerification{},
+		&model.Session{},
+		&model.Project{},
+		&model.Repository{},
+		&model.WorkItem{},
+		&model.AcceptanceCriterion{},
+		&model.Activity{},
+		&model.IdempotencyRecord{},
+	); err != nil {
+		return err
+	}
+	if db.Migrator().HasIndex(&model.Project{}, "idx_projects_slug") {
+		if err := db.Migrator().DropIndex(&model.Project{}, "idx_projects_slug"); err != nil {
+			return fmt.Errorf("remove legacy global project slug index: %w", err)
+		}
+	}
+	return nil
 }

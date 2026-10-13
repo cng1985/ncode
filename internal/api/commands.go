@@ -6,10 +6,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
+	"github.com/cng1985/ncode/internal/identity"
 	"github.com/cng1985/ncode/internal/model"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -25,6 +27,9 @@ func readBody(c *gin.Context, target any) ([]byte, bool) {
 }
 
 func (h *handler) writeAction(c *gin.Context, action string, body []byte, operation func(*gorm.DB) (any, *apiError)) {
+	// Idempotency keys are scoped to the active workspace so a replay cannot
+	// return another workspace's previously stored response.
+	action = fmt.Sprintf("workspace:%d:%s", identity.WorkspaceID(c), action)
 	key := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	if key == "" || len(key) > 120 {
 		failure(c, http.StatusBadRequest, 41001, "Idempotency-Key is required", nil)

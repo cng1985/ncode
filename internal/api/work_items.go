@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cng1985/ncode/internal/identity"
 	"github.com/cng1985/ncode/internal/model"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -115,18 +116,18 @@ func (h *handler) createWorkItem(c *gin.Context) {
 		return
 	}
 	if req.OwnerName == "" {
-		req.OwnerName = "我"
+		req.OwnerName = identity.UserName(c)
 	}
 	h.writeAction(c, "workItem/create", body, func(tx *gorm.DB) (any, *apiError) {
 		var project model.Project
-		if err := tx.First(&project, req.ProjectID).Error; err != nil {
+		if err := tx.Where("tenant_id = ?", identity.WorkspaceID(c)).First(&project, req.ProjectID).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
 				return nil, &apiError{status: http.StatusNotFound, code: 42002, msg: "project not found"}
 			}
 			return nil, &apiError{status: http.StatusInternalServerError, code: 50001, msg: "request could not be completed"}
 		}
 		criteria := toCriteria(req.Criteria)
-		item := model.WorkItem{ProjectID: project.ID, Title: req.Title, Description: req.Description, Type: req.Type, Priority: req.Priority, State: 0, AcceptanceState: "NONE", OwnerName: req.OwnerName, DueDate: model.LocalDate(req.DueDate), Version: 1, ChecklistVersion: 1, Criteria: criteria}
+		item := model.WorkItem{TenantID: identity.WorkspaceID(c), ProjectID: project.ID, Title: req.Title, Description: req.Description, Type: req.Type, Priority: req.Priority, State: 0, AcceptanceState: "NONE", OwnerName: req.OwnerName, DueDate: model.LocalDate(req.DueDate), Version: 1, ChecklistVersion: 1, Criteria: criteria}
 		if err := tx.Create(&item).Error; err != nil {
 			return nil, &apiError{status: http.StatusInternalServerError, code: 50001, msg: "request could not be completed"}
 		}
@@ -134,7 +135,7 @@ func (h *handler) createWorkItem(c *gin.Context) {
 		if err := tx.Model(&item).Update("code", item.Code).Error; err != nil || !model.SafeID(item.ID) {
 			return nil, &apiError{status: http.StatusInternalServerError, code: 50001, msg: "request could not be completed"}
 		}
-		if err := addActivity(tx, item, "我", "CREATED", "", item.Title); err != nil {
+		if err := addActivity(tx, item, identity.UserName(c), "CREATED", "", item.Title); err != nil {
 			return nil, &apiError{status: http.StatusInternalServerError, code: 50001, msg: "request could not be completed"}
 		}
 		if err := tx.Preload("Criteria").Preload("Project").First(&item, item.ID).Error; err != nil {
@@ -155,7 +156,7 @@ func (h *handler) updateWorkItem(c *gin.Context) {
 	}
 	tx := h.db.Begin()
 	var item model.WorkItem
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Criteria").Preload("Project").First(&item, req.ID).Error; err != nil {
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Criteria").Preload("Project").Where("tenant_id = ?", identity.WorkspaceID(c)).First(&item, req.ID).Error; err != nil {
 		tx.Rollback()
 		if err == gorm.ErrRecordNotFound {
 			failure(c, http.StatusNotFound, 42002, "work item not found", nil)
@@ -178,7 +179,7 @@ func (h *handler) updateWorkItem(c *gin.Context) {
 	item.OwnerName = strings.TrimSpace(req.OwnerName)
 	item.DueDate = model.LocalDate(req.DueDate)
 	if item.OwnerName == "" {
-		item.OwnerName = "我"
+		item.OwnerName = identity.UserName(c)
 	}
 	if criteriaChanged {
 		if err := tx.Where("work_item_id = ?", item.ID).Delete(&model.AcceptanceCriterion{}).Error; err != nil {
@@ -210,7 +211,7 @@ func (h *handler) updateWorkItem(c *gin.Context) {
 		return
 	}
 	newValue, _ := json.Marshal(gin.H{"title": item.Title, "priority": item.Priority, "ownerName": item.OwnerName, "dueDate": item.DueDate, "checklistVersion": item.ChecklistVersion})
-	if err := addActivity(tx, item, "我", "UPDATED", string(oldValue), string(newValue)); err != nil {
+	if err := addActivity(tx, item, identity.UserName(c), "UPDATED", string(oldValue), string(newValue)); err != nil {
 		tx.Rollback()
 		internalFailure(c)
 		return
@@ -239,7 +240,7 @@ func (h *handler) transitionWorkItem(c *gin.Context) {
 	}
 	h.writeAction(c, "workItem/transition", body, func(tx *gorm.DB) (any, *apiError) {
 		var item model.WorkItem
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Criteria").Preload("Project").First(&item, req.ID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Criteria").Preload("Project").Where("tenant_id = ?", identity.WorkspaceID(c)).First(&item, req.ID).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
 				return nil, &apiError{status: http.StatusNotFound, code: 42002, msg: "work item not found"}
 			}
@@ -292,7 +293,7 @@ func (h *handler) transitionWorkItem(c *gin.Context) {
 		if strings.TrimSpace(req.Reason) != "" {
 			newValue += ": " + strings.TrimSpace(req.Reason)
 		}
-		if err := addActivity(tx, item, "我", req.Action, oldValue, newValue); err != nil {
+		if err := addActivity(tx, item, identity.UserName(c), req.Action, oldValue, newValue); err != nil {
 			return nil, &apiError{status: http.StatusInternalServerError, code: 50001, msg: "request could not be completed"}
 		}
 		if err := tx.Preload("Criteria").Preload("Project").First(&item, item.ID).Error; err != nil {
@@ -314,7 +315,7 @@ func (h *handler) acceptWorkItem(c *gin.Context) {
 	}
 	h.writeAction(c, "workItem/accept", body, func(tx *gorm.DB) (any, *apiError) {
 		var item model.WorkItem
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Criteria").Preload("Project").First(&item, req.ID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Criteria").Preload("Project").Where("tenant_id = ?", identity.WorkspaceID(c)).First(&item, req.ID).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
 				return nil, &apiError{status: http.StatusNotFound, code: 42002, msg: "work item not found"}
 			}
@@ -337,7 +338,7 @@ func (h *handler) acceptWorkItem(c *gin.Context) {
 		if err := tx.Model(&item).Updates(map[string]any{"state": item.State, "acceptance_state": item.AcceptanceState, "version": item.Version, "updated_at": time.Now().UTC()}).Error; err != nil {
 			return nil, &apiError{status: http.StatusInternalServerError, code: 50001, msg: "request could not be completed"}
 		}
-		if err := addActivity(tx, item, "我", "ACCEPTED", "待验收", "已验收："+strings.TrimSpace(req.AcceptanceStatement)); err != nil {
+		if err := addActivity(tx, item, identity.UserName(c), "ACCEPTED", "待验收", "已验收："+strings.TrimSpace(req.AcceptanceStatement)); err != nil {
 			return nil, &apiError{status: http.StatusInternalServerError, code: 50001, msg: "request could not be completed"}
 		}
 		if err := tx.Preload("Criteria").Preload("Project").First(&item, item.ID).Error; err != nil {
@@ -360,7 +361,7 @@ func (h *handler) pageWorkItems(c *gin.Context) {
 		badRequest(c)
 		return
 	}
-	query := h.db.Model(&model.WorkItem{}).Where("project_id = ?", req.Filters.ProjectID)
+	query := h.db.Model(&model.WorkItem{}).Where("tenant_id = ? AND project_id = ?", identity.WorkspaceID(c), req.Filters.ProjectID)
 	if req.Filters.State != nil {
 		query = query.Where("state = ?", *req.Filters.State)
 	}
@@ -408,6 +409,15 @@ func (h *handler) workItemActivity(c *gin.Context) {
 	if !bind(c, &req) || !model.SafeID(req.WorkItemID) {
 		if !c.Writer.Written() {
 			badRequest(c)
+		}
+		return
+	}
+	var item model.WorkItem
+	if err := h.db.Where("tenant_id = ?", identity.WorkspaceID(c)).First(&item, req.WorkItemID).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			failure(c, http.StatusNotFound, 42002, "work item not found", nil)
+		} else {
+			internalFailure(c)
 		}
 		return
 	}

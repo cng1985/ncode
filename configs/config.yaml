@@ -7,3 +7,6 @@ database:
   url: postgres://127.0.0.1:54329/ncode?sslmode=disable
   username: ncode
   password: ncode_local_dev
+
+storage:
+  git_root: ../var/git

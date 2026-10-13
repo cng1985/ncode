@@ -16,6 +16,7 @@ import (
 type Config struct {
 	Address     string
 	DatabaseURL string
+	GitRoot     string
 	AppEnv      string
 	SeedDemo    bool
 }
@@ -32,6 +33,9 @@ type fileConfig struct {
 		User     string `yaml:"user"`
 		Password string `yaml:"password"`
 	} `yaml:"database"`
+	Storage struct {
+		GitRoot string `yaml:"git_root"`
+	} `yaml:"storage"`
 }
 
 var Module = fx.Module("config", fx.Provide(Load))
@@ -76,6 +80,17 @@ func Load() (Config, error) {
 		}
 	}
 
+	gitRoot := strings.TrimSpace(os.Getenv("GIT_ROOT"))
+	if gitRoot == "" {
+		gitRoot = strings.TrimSpace(file.Storage.GitRoot)
+	}
+	if gitRoot == "" {
+		gitRoot = "../var/git"
+	}
+	if !filepath.IsAbs(gitRoot) {
+		gitRoot = filepath.Join(filepath.Dir(configPath), gitRoot)
+	}
+
 	appEnv := strings.TrimSpace(file.Server.Environment)
 	if override := strings.TrimSpace(os.Getenv("APP_ENV")); override != "" {
 		appEnv = override
@@ -101,6 +116,7 @@ func Load() (Config, error) {
 	return Config{
 		Address:     address,
 		DatabaseURL: databaseURL,
+		GitRoot:     filepath.Clean(gitRoot),
 		AppEnv:      appEnv,
 		SeedDemo:    seedDemo,
 	}, nil

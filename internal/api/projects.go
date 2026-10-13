@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cng1985/ncode/internal/identity"
 	"github.com/cng1985/ncode/internal/model"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -52,12 +53,12 @@ func (h *handler) createProject(c *gin.Context) {
 	if req.Visibility == "" {
 		req.Visibility = "private"
 	}
-	if req.Name == "" || len([]rune(req.Name)) > 120 || !slugPattern.MatchString(req.Slug) || len(req.Goal) > 500 || !oneOf(req.Type, "learning", "open_source", "product", "team") || !oneOf(req.Visibility, "private", "internal", "public") {
+	if req.Name == "" || len([]rune(req.Name)) > 120 || !slugPattern.MatchString(req.Slug) || len(req.Goal) > 500 || !oneOf(req.Type, "learning", "open_source", "product", "team") || req.Visibility != "private" {
 		badRequest(c)
 		return
 	}
 	h.writeAction(c, "project/create", body, func(tx *gorm.DB) (any, *apiError) {
-		project := model.Project{Name: req.Name, Slug: req.Slug, Goal: req.Goal, Type: req.Type, Visibility: req.Visibility, State: 1, OwnerName: "我"}
+		project := model.Project{TenantID: identity.WorkspaceID(c), OwnerUserID: identity.UserID(c), Name: req.Name, Slug: req.Slug, Goal: req.Goal, Type: req.Type, Visibility: req.Visibility, State: 1, OwnerName: identity.UserName(c)}
 		if err := tx.Create(&project).Error; err != nil {
 			if strings.Contains(strings.ToLower(err.Error()), "duplicate") || strings.Contains(strings.ToLower(err.Error()), "unique") {
 				return nil, &apiError{status: http.StatusConflict, code: 42002, msg: "project slug is already in use"}
@@ -90,7 +91,7 @@ func (h *handler) pageProjects(c *gin.Context) {
 	if !ok {
 		return
 	}
-	query := h.db.Model(&model.Project{})
+	query := h.db.Model(&model.Project{}).Where("tenant_id = ?", identity.WorkspaceID(c))
 	if req.Filters.Keyword != "" {
 		query = query.Where("name ILIKE ? OR goal ILIKE ?", "%"+req.Filters.Keyword+"%", "%"+req.Filters.Keyword+"%")
 	}
@@ -130,7 +131,7 @@ func (h *handler) oneProject(c *gin.Context) {
 		return
 	}
 	var project model.Project
-	if err := h.db.First(&project, req.ID).Error; err != nil {
+	if err := h.db.Where("tenant_id = ?", identity.WorkspaceID(c)).First(&project, req.ID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			failure(c, http.StatusNotFound, 42002, "project not found", nil)
 			return

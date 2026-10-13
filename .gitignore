@@ -1,6 +1,7 @@
 /web/node_modules/
-/web/dist/
 /web/.env.local
 /configs/config.local.yaml
+/bin/
+/var/
 /tmp/
 .DS_Store

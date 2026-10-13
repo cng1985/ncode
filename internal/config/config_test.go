@@ -35,6 +35,30 @@ func TestLoadReadsDatabaseSettingsFromYAML(t *testing.T) {
 	}
 }
 
+func TestLoadResolvesGitStoragePathFromYAMLAndEnvironment(t *testing.T) {
+	resetEnvironment(t)
+	configPath := writeConfig(t, append(validConfigLines(), "storage:", "  git_root: ./repositories")...)
+	t.Setenv("CONFIG_FILE", configPath)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	want := filepath.Join(filepath.Dir(configPath), "repositories")
+	if cfg.GitRoot != want {
+		t.Fatalf("GitRoot = %q, want %q", cfg.GitRoot, want)
+	}
+
+	override := filepath.Join(t.TempDir(), "git-data")
+	t.Setenv("GIT_ROOT", override)
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load() with GIT_ROOT error = %v", err)
+	}
+	if cfg.GitRoot != override {
+		t.Fatalf("GIT_ROOT resolved to %q, want %q", cfg.GitRoot, override)
+	}
+}
+
 func TestLoadAllowsDatabasePasswordEnvironmentOverride(t *testing.T) {
 	resetEnvironment(t)
 	t.Setenv("CONFIG_FILE", writeConfig(t, validConfigLines()...))
@@ -146,6 +170,7 @@ func resetEnvironment(t *testing.T) {
 		"DATABASE_PASSWORD",
 		"APP_ENV",
 		"SEED_DEMO",
+		"GIT_ROOT",
 	} {
 		t.Setenv(name, "")
 	}

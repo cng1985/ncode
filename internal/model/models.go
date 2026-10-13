@@ -12,20 +12,40 @@ import (
 const MaxSafeID int64 = 9007199254740991
 
 type Project struct {
-	ID         int64     `gorm:"primaryKey"`
-	Name       string    `gorm:"size:120;not null"`
-	Slug       string    `gorm:"size:80;not null;uniqueIndex"`
-	Goal       string    `gorm:"size:500;not null;default:''"`
-	Type       string    `gorm:"size:24;not null;default:'product';index"`
-	Visibility string    `gorm:"size:16;not null;default:'private'"`
-	State      int       `gorm:"not null;default:1;index"`
-	OwnerName  string    `gorm:"size:80;not null;default:'我'"`
-	CreatedAt  time.Time `gorm:"not null"`
-	UpdatedAt  time.Time `gorm:"not null"`
+	ID          int64     `gorm:"primaryKey"`
+	TenantID    int64     `gorm:"not null;default:1;index;uniqueIndex:idx_projects_tenant_slug"`
+	OwnerUserID int64     `gorm:"not null;default:1;index"`
+	Name        string    `gorm:"size:120;not null"`
+	Slug        string    `gorm:"size:80;not null;uniqueIndex:idx_projects_tenant_slug"`
+	Goal        string    `gorm:"size:500;not null;default:''"`
+	Type        string    `gorm:"size:24;not null;default:'product';index"`
+	Visibility  string    `gorm:"size:16;not null;default:'private'"`
+	State       int       `gorm:"not null;default:1;index"`
+	OwnerName   string    `gorm:"size:80;not null;default:'我'"`
+	CreatedAt   time.Time `gorm:"not null"`
+	UpdatedAt   time.Time `gorm:"not null"`
+}
+
+// Repository metadata points to an immutable on-disk path managed by the
+// repository module; the physical path is never returned by the API.
+type Repository struct {
+	ID            int64     `gorm:"primaryKey"`
+	TenantID      int64     `gorm:"not null;index;uniqueIndex:idx_repository_tenant_slug"`
+	ProjectID     int64     `gorm:"not null;index"`
+	OwnerUserID   int64     `gorm:"not null;index"`
+	Name          string    `gorm:"size:120;not null"`
+	Slug          string    `gorm:"size:80;not null;uniqueIndex:idx_repository_tenant_slug"`
+	Visibility    string    `gorm:"size:16;not null;default:'private'"`
+	DefaultBranch string    `gorm:"size:80;not null;default:'main'"`
+	DiskPath      string    `gorm:"size:500;not null;uniqueIndex"`
+	State         string    `gorm:"size:20;not null;default:'initializing';index"`
+	CreatedAt     time.Time `gorm:"not null"`
+	UpdatedAt     time.Time `gorm:"not null"`
 }
 
 type WorkItem struct {
 	ID               int64                 `gorm:"primaryKey"`
+	TenantID         int64                 `gorm:"not null;default:1;index"`
 	ProjectID        int64                 `gorm:"not null;index"`
 	Code             string                `gorm:"size:24;not null;uniqueIndex"`
 	Title            string                `gorm:"size:180;not null"`
@@ -42,6 +62,70 @@ type WorkItem struct {
 	Project          Project               `gorm:"foreignKey:ProjectID"`
 	CreatedAt        time.Time             `gorm:"not null"`
 	UpdatedAt        time.Time             `gorm:"not null"`
+}
+
+// User is an NCode account. Email addresses are normalized to lower case by the
+// identity service before persistence.
+type User struct {
+	ID              int64      `gorm:"primaryKey"`
+	Email           string     `gorm:"size:254;not null;uniqueIndex"`
+	Name            string     `gorm:"size:80;not null"`
+	PasswordHash    string     `gorm:"size:100;not null"`
+	EmailVerifiedAt *time.Time `gorm:"index"`
+	CreatedAt       time.Time  `gorm:"not null"`
+	UpdatedAt       time.Time  `gorm:"not null"`
+}
+
+type Tenant struct {
+	ID          int64     `gorm:"primaryKey"`
+	Name        string    `gorm:"size:120;not null"`
+	OwnerUserID int64     `gorm:"not null;index"`
+	Kind        string    `gorm:"size:16;not null;default:'personal'"`
+	CreatedAt   time.Time `gorm:"not null"`
+	UpdatedAt   time.Time `gorm:"not null"`
+}
+
+type Membership struct {
+	ID        int64     `gorm:"primaryKey"`
+	TenantID  int64     `gorm:"not null;uniqueIndex:idx_membership_tenant_user"`
+	UserID    int64     `gorm:"not null;uniqueIndex:idx_membership_tenant_user"`
+	Role      string    `gorm:"size:24;not null;default:'owner'"`
+	State     string    `gorm:"size:16;not null;default:'active';index"`
+	CreatedAt time.Time `gorm:"not null"`
+	UpdatedAt time.Time `gorm:"not null"`
+}
+
+type WorkspaceInvitation struct {
+	ID           int64      `gorm:"primaryKey"`
+	TenantID     int64      `gorm:"not null;index"`
+	InvitedEmail string     `gorm:"size:254;not null;index"`
+	Role         string     `gorm:"size:24;not null;default:'member'"`
+	TokenHash    string     `gorm:"size:64;not null;uniqueIndex"`
+	InvitedBy    int64      `gorm:"not null"`
+	ExpiresAt    time.Time  `gorm:"not null;index"`
+	AcceptedAt   *time.Time `gorm:"index"`
+	RevokedAt    *time.Time `gorm:"index"`
+	CreatedAt    time.Time  `gorm:"not null"`
+	UpdatedAt    time.Time  `gorm:"not null"`
+}
+
+type EmailVerification struct {
+	ID        int64      `gorm:"primaryKey"`
+	UserID    int64      `gorm:"not null;index"`
+	TokenHash string     `gorm:"size:64;not null;uniqueIndex"`
+	ExpiresAt time.Time  `gorm:"not null;index"`
+	UsedAt    *time.Time `gorm:"index"`
+	CreatedAt time.Time  `gorm:"not null"`
+}
+
+type Session struct {
+	ID         int64      `gorm:"primaryKey"`
+	UserID     int64      `gorm:"not null;index"`
+	TokenHash  string     `gorm:"size:64;not null;uniqueIndex"`
+	ExpiresAt  time.Time  `gorm:"not null;index"`
+	RevokedAt  *time.Time `gorm:"index"`
+	LastSeenAt time.Time  `gorm:"not null"`
+	CreatedAt  time.Time  `gorm:"not null"`
 }
 
 type AcceptanceCriterion struct {
@@ -82,24 +166,28 @@ func RequestHash(body []byte) string {
 }
 
 func SeedDemo(db *gorm.DB) error {
+	var demoTenant Tenant
+	if err := db.Where("kind = ? AND name = ?", "demo", "演示空间").FirstOrCreate(&demoTenant, Tenant{Kind: "demo", Name: "演示空间"}).Error; err != nil {
+		return err
+	}
 	var count int64
 	if err := db.Model(&Project{}).Count(&count).Error; err != nil || count > 0 {
 		return err
 	}
 	now := time.Now().In(time.FixedZone("CST", 8*60*60))
 	projects := []Project{
-		{Name: "NCode 官网", Slug: "ncode-website", Goal: "重构网站前端架构，提升性能与可维护性。", Type: "product", Visibility: "private", State: 1, OwnerName: "我"},
-		{Name: "在线评测系统", Slug: "online-evaluation", Goal: "优化评测任务的调度、隔离与反馈。", Type: "product", Visibility: "private", State: 1, OwnerName: "我"},
-		{Name: "移动端应用", Slug: "mobile-app", Goal: "完成版本发布并跟进首批用户反馈。", Type: "product", Visibility: "private", State: 1, OwnerName: "我"},
+		{TenantID: demoTenant.ID, OwnerUserID: 0, Name: "NCode 官网", Slug: "ncode-website", Goal: "重构网站前端架构，提升性能与可维护性。", Type: "product", Visibility: "private", State: 1, OwnerName: "我"},
+		{TenantID: demoTenant.ID, OwnerUserID: 0, Name: "在线评测系统", Slug: "online-evaluation", Goal: "优化评测任务的调度、隔离与反馈。", Type: "product", Visibility: "private", State: 1, OwnerName: "我"},
+		{TenantID: demoTenant.ID, OwnerUserID: 0, Name: "移动端应用", Slug: "mobile-app", Goal: "完成版本发布并跟进首批用户反馈。", Type: "product", Visibility: "private", State: 1, OwnerName: "我"},
 	}
 	if err := db.Create(&projects).Error; err != nil {
 		return err
 	}
 	date := func(days int) LocalDate { return LocalDate(now.AddDate(0, 0, days).Format("2006-01-02")) }
 	items := []WorkItem{
-		{ProjectID: projects[0].ID, Code: "NC-241", Title: "实现首页开发者案例展示模块", Description: "完成首页案例列表与详情入口，适配桌面和移动屏幕。", Type: "TASK", Priority: "HIGH", State: 2, OwnerName: "张三", DueDate: date(2), Version: 1, ChecklistVersion: 1, Criteria: []AcceptanceCriterion{{Text: "案例列表在桌面端正常展示", Position: 0}, {Text: "窄屏布局无横向溢出", Position: 1}, {Text: "接口失败时显示可重试状态", Position: 2}}},
-		{ProjectID: projects[1].ID, Code: "NC-318", Title: "优化评测任务调度性能", Description: "减少队列等待时间，并确保旧版本结果不会覆盖新提交。", Type: "TASK", Priority: "HIGH", State: 3, OwnerName: "李四", DueDate: date(3), Version: 1, ChecklistVersion: 1, Criteria: []AcceptanceCriterion{{Text: "固定提交版本生成评测结果", Position: 0}, {Text: "基础设施错误不计为错答", Position: 1}}},
-		{ProjectID: projects[2].ID, Code: "NC-402", Title: "发布 1.2.0 版本并完成上线检查", Description: "核对发布清单、应用健康状态和回滚方案。", Type: "STORY", Priority: "MEDIUM", State: 3, AcceptanceState: "PENDING", OwnerName: "王五", DueDate: date(7), Version: 1, ChecklistVersion: 1, Criteria: []AcceptanceCriterion{{Text: "版本健康检查通过", Position: 0}, {Text: "回滚版本可用", Position: 1}, {Text: "发布记录完整", Position: 2}}},
+		{TenantID: demoTenant.ID, ProjectID: projects[0].ID, Code: "NC-241", Title: "实现首页开发者案例展示模块", Description: "完成首页案例列表与详情入口，适配桌面和移动屏幕。", Type: "TASK", Priority: "HIGH", State: 2, OwnerName: "张三", DueDate: date(2), Version: 1, ChecklistVersion: 1, Criteria: []AcceptanceCriterion{{Text: "案例列表在桌面端正常展示", Position: 0}, {Text: "窄屏布局无横向溢出", Position: 1}, {Text: "接口失败时显示可重试状态", Position: 2}}},
+		{TenantID: demoTenant.ID, ProjectID: projects[1].ID, Code: "NC-318", Title: "优化评测任务调度性能", Description: "减少队列等待时间，并确保旧版本结果不会覆盖新提交。", Type: "TASK", Priority: "HIGH", State: 3, OwnerName: "李四", DueDate: date(3), Version: 1, ChecklistVersion: 1, Criteria: []AcceptanceCriterion{{Text: "固定提交版本生成评测结果", Position: 0}, {Text: "基础设施错误不计为错答", Position: 1}}},
+		{TenantID: demoTenant.ID, ProjectID: projects[2].ID, Code: "NC-402", Title: "发布 1.2.0 版本并完成上线检查", Description: "核对发布清单、应用健康状态和回滚方案。", Type: "STORY", Priority: "MEDIUM", State: 3, AcceptanceState: "PENDING", OwnerName: "王五", DueDate: date(7), Version: 1, ChecklistVersion: 1, Criteria: []AcceptanceCriterion{{Text: "版本健康检查通过", Position: 0}, {Text: "回滚版本可用", Position: 1}, {Text: "发布记录完整", Position: 2}}},
 	}
 	for i := range items {
 		if items[i].AcceptanceState == "" {
