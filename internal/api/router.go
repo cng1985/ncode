@@ -3,13 +3,20 @@ package api
 import (
 	"net/http"
 
+	"github.com/cng1985/ncode/internal/config"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/fx"
 	"gorm.io/gorm"
 )
 
+var Module = fx.Module("api", fx.Provide(NewRouter))
+
 type handler struct{ db *gorm.DB }
 
-func NewRouter(db *gorm.DB) http.Handler {
+func NewRouter(db *gorm.DB, cfg config.Config) http.Handler {
+	if cfg.AppEnv == "production" {
+		gin.SetMode(gin.ReleaseMode)
+	}
 	r := gin.New()
 	r.Use(gin.Recovery())
 	h := &handler{db: db}

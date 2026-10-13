@@ -21,6 +21,10 @@ The current slice does not include authentication, tenant authorization, Git hos
 - Redis 7 is included in Compose for the next queue/coordination slice; the current slice does not depend on it
 - Vue 3, Vite, Element Plus, and JavaScript
 
+## Backend modules
+
+The Fx composition root lives in internal/app. It combines config, logging, database, API, and HTTP server modules; cmd/api only starts that application. The database module owns connection checks, schema migration, demo seeding, and connection-pool cleanup. The HTTP server module binds during Fx startup, reports bind errors to startup, and gracefully shuts down before the database closes.
+
 ## Start locally
 
 Start PostgreSQL and Redis from the repository root:
@@ -62,7 +66,7 @@ cd /workspace/ncode/web
 npm run build
 ```
 
-The initial repository contains no automated test files yet. During this setup, the API was exercised against a temporary PostgreSQL database through project creation, idempotent replay/conflict, work-item transitions, acceptance checklist enforcement, stale-version conflict, paging, and activity history. The browser flow also created a project and work item, completed the lifecycle, and checked the desktop/mobile workbench.
+Automated tests cover environment validation, the Fx dependency graph, and HTTP server startup/shutdown. During this setup, the API was also exercised against a temporary PostgreSQL database through project creation, idempotent replay/conflict, work-item transitions, acceptance checklist enforcement, stale-version conflict, paging, and activity history. The browser flow created a project and work item, completed the lifecycle, and checked the desktop/mobile workbench.
 
 ## API shape
 
