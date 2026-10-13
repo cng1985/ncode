@@ -1,0 +1,12 @@
+server:
+  address: 127.0.0.1:8080
+  environment: development
+  seed_demo: true
+
+database:
+  host: 127.0.0.1
+  port: 54329
+  user: ncode
+  password: ncode_local_dev
+  name: ncode
+  ssl_mode: disable

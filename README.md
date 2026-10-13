@@ -25,6 +25,12 @@ The current slice does not include authentication, tenant authorization, Git hos
 
 The Fx composition root lives in internal/app. It combines config, logging, database, API, and HTTP server modules; cmd/api only starts that application. The database module owns connection checks, schema migration, demo seeding, and connection-pool cleanup. The HTTP server module binds during Fx startup, reports bind errors to startup, and gracefully shuts down before the database closes.
 
+## Configuration
+
+The application reads server and PostgreSQL settings from configs/config.yaml. Set CONFIG_FILE to load another YAML file. DATABASE_PASSWORD can override the password in YAML, and DATABASE_URL can override the complete PostgreSQL URL for deployment environments. API_ADDR, APP_ENV, and SEED_DEMO can also override their YAML values. Production always disables demo seeding.
+
+The checked-in YAML contains credentials for the loopback-only Compose database and is for local development only. Keep real deployment credentials outside version control.
+
 ## Start locally
 
 Start PostgreSQL and Redis from the repository root:
