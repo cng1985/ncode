@@ -73,6 +73,9 @@ export const api = {
   activity: (workItemId) => post('workItem/query/activity', { workItemId }),
   repositories: (page = 1) => post('repository/query/page', { page, size: 100 }),
   createRepository: (body) => post('repository/create', body),
+  repositoryRefs: (repositoryId) => post('repository/query/refs', { repositoryId }),
+  repositoryCommits: (repositoryId, ref) => post('repository/query/commits', { repositoryId, ref }),
+  repositoryDiff: (repositoryId, baseRef, compareRef) => post('repository/query/diff', { repositoryId, baseRef, compareRef }),
   repositoryTree: (repositoryId, path = '', ref = '') => post('repository/query/tree', { repositoryId, path, ref }),
   repositoryFile: (repositoryId, path, ref = '') => post('repository/query/file', { repositoryId, path, ref }),
 }

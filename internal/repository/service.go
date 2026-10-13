@@ -45,6 +45,9 @@ func New(db *gorm.DB, cfg config.Config) *Service {
 func (s *Service) RegisterRoutes(r *gin.RouterGroup) {
 	r.POST("/repository/create", s.create)
 	r.POST("/repository/query/page", s.page)
+	r.POST("/repository/query/refs", s.refs)
+	r.POST("/repository/query/commits", s.commits)
+	r.POST("/repository/query/diff", s.diff)
 	r.POST("/repository/query/tree", s.tree)
 	r.POST("/repository/query/file", s.file)
 }
@@ -85,6 +88,21 @@ type treeEntry struct {
 	Type string `json:"type"`
 	OID  string `json:"oid"`
 	Mode string `json:"mode"`
+}
+
+type refEntry struct {
+	Ref     string `json:"ref"`
+	Name    string `json:"name"`
+	OID     string `json:"oid"`
+	Kind    string `json:"kind"`
+	Subject string `json:"subject"`
+}
+
+type commitEntry struct {
+	Hash        string `json:"hash"`
+	Author      string `json:"author"`
+	CommittedAt string `json:"committedAt"`
+	Subject     string `json:"subject"`
 }
 
 func (s *Service) create(c *gin.Context) {
@@ -183,6 +201,106 @@ func (s *Service) page(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "success", "data": data, "page": page, "size": size, "total": total, "totalPage": totalPages, "responseType": "page"})
 }
 
+func (s *Service) refs(c *gin.Context) {
+	var req treeRequest
+	if !bind(c, &req) {
+		return
+	}
+	repo, ok := s.loadRepo(c, req.RepositoryID)
+	if !ok {
+		return
+	}
+	ctx, cancel := repositoryGitContext(c)
+	defer cancel()
+	output, err := gitOutput(ctx, repo.DiskPath, "for-each-ref", "--count=200", "--sort=refname", "--format=%(refname)%00%(objectname)%00%(objecttype)%00%(subject)", "refs/heads", "refs/tags")
+	if err != nil {
+		fail(c, http.StatusInternalServerError, 50001, "repository references could not be read")
+		return
+	}
+	refs, err := parseRefs(output)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, 50001, "repository references could not be read")
+		return
+	}
+	success(c, gin.H{"repositoryId": repo.ID, "refs": refs})
+}
+
+func (s *Service) commits(c *gin.Context) {
+	var req treeRequest
+	if !bind(c, &req) {
+		return
+	}
+	repo, ok := s.loadRepo(c, req.RepositoryID)
+	if !ok {
+		return
+	}
+	ref := strings.TrimSpace(req.Ref)
+	if ref == "" {
+		ref = repo.DefaultBranch
+	}
+	ctx, cancel := repositoryGitContext(c)
+	defer cancel()
+	commit, err := resolveCommit(ctx, repo, ref)
+	if err != nil {
+		fail(c, http.StatusNotFound, 42002, "repository ref not found")
+		return
+	}
+	output, err := gitOutput(ctx, repo.DiskPath, "log", "--max-count=100", "--format=%H%x00%an%x00%aI%x00%s", commit)
+	if err != nil {
+		fail(c, http.StatusNotFound, 42002, "repository history not found")
+		return
+	}
+	commits, err := parseCommits(output)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, 50001, "repository history could not be read")
+		return
+	}
+	success(c, gin.H{"repositoryId": repo.ID, "ref": ref, "commits": commits})
+}
+
+func (s *Service) diff(c *gin.Context) {
+	var req struct {
+		RepositoryID int64  `json:"repositoryId"`
+		BaseRef      string `json:"baseRef"`
+		CompareRef   string `json:"compareRef"`
+	}
+	if !bind(c, &req) {
+		return
+	}
+	repo, ok := s.loadRepo(c, req.RepositoryID)
+	if !ok {
+		return
+	}
+	baseRef, compareRef := strings.TrimSpace(req.BaseRef), strings.TrimSpace(req.CompareRef)
+	if baseRef == "" || compareRef == "" || len(baseRef) > 120 || len(compareRef) > 120 {
+		fail(c, http.StatusBadRequest, 41001, "two valid repository refs are required")
+		return
+	}
+	ctx, cancel := repositoryGitContext(c)
+	defer cancel()
+	baseCommit, err := resolveCommit(ctx, repo, baseRef)
+	if err != nil {
+		fail(c, http.StatusNotFound, 42002, "base ref not found")
+		return
+	}
+	compareCommit, err := resolveCommit(ctx, repo, compareRef)
+	if err != nil {
+		fail(c, http.StatusNotFound, 42002, "compare ref not found")
+		return
+	}
+	output, err := gitOutput(ctx, repo.DiskPath, "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", baseCommit, compareCommit, "--")
+	if err != nil {
+		fail(c, http.StatusInternalServerError, 50001, "repository diff could not be generated")
+		return
+	}
+	const maxDiffSize = 512 << 10
+	if len(output) > maxDiffSize {
+		fail(c, http.StatusRequestEntityTooLarge, 42001, "diff preview is limited to 512 KiB")
+		return
+	}
+	success(c, gin.H{"repositoryId": repo.ID, "baseRef": baseRef, "compareRef": compareRef, "diff": string(output)})
+}
+
 func (s *Service) tree(c *gin.Context) {
 	var req treeRequest
 	if !bind(c, &req) {
@@ -201,7 +319,9 @@ func (s *Service) tree(c *gin.Context) {
 	if ref == "" {
 		ref = repo.DefaultBranch
 	}
-	commit, err := resolveCommit(c.Request.Context(), repo, ref)
+	ctx, cancel := repositoryGitContext(c)
+	defer cancel()
+	commit, err := resolveCommit(ctx, repo, ref)
 	if err != nil {
 		fail(c, http.StatusNotFound, 42002, "repository ref not found")
 		return
@@ -210,7 +330,7 @@ func (s *Service) tree(c *gin.Context) {
 	if dir != "" {
 		args = []string{"ls-tree", "-z", commit + ":" + dir}
 	}
-	output, err := gitOutput(c.Request.Context(), repo.DiskPath, args...)
+	output, err := gitOutput(ctx, repo.DiskPath, args...)
 	if err != nil {
 		fail(c, http.StatusNotFound, 42002, "repository path not found")
 		return
@@ -241,23 +361,25 @@ func (s *Service) file(c *gin.Context) {
 	if ref == "" {
 		ref = repo.DefaultBranch
 	}
-	commit, err := resolveCommit(c.Request.Context(), repo, ref)
+	ctx, cancel := repositoryGitContext(c)
+	defer cancel()
+	commit, err := resolveCommit(ctx, repo, ref)
 	if err != nil {
 		fail(c, http.StatusNotFound, 42002, "repository ref not found")
 		return
 	}
-	objectID, err := gitOutput(c.Request.Context(), repo.DiskPath, "rev-parse", "--verify", "--end-of-options", commit+":"+filePath)
+	objectID, err := gitOutput(ctx, repo.DiskPath, "rev-parse", "--verify", "--end-of-options", commit+":"+filePath)
 	if err != nil {
 		fail(c, http.StatusNotFound, 42002, "repository file not found")
 		return
 	}
 	objectIDText := strings.TrimSpace(string(objectID))
-	objectType, err := gitOutput(c.Request.Context(), repo.DiskPath, "cat-file", "-t", objectIDText)
+	objectType, err := gitOutput(ctx, repo.DiskPath, "cat-file", "-t", objectIDText)
 	if err != nil || strings.TrimSpace(string(objectType)) != "blob" {
 		fail(c, http.StatusBadRequest, 42001, "repository path is not a regular file")
 		return
 	}
-	sizeOutput, err := gitOutput(c.Request.Context(), repo.DiskPath, "cat-file", "-s", objectIDText)
+	sizeOutput, err := gitOutput(ctx, repo.DiskPath, "cat-file", "-s", objectIDText)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, 50001, "repository file could not be read")
 		return
@@ -271,7 +393,7 @@ func (s *Service) file(c *gin.Context) {
 		fail(c, http.StatusRequestEntityTooLarge, 42001, "file preview is limited to 1 MiB")
 		return
 	}
-	content, err := gitOutput(c.Request.Context(), repo.DiskPath, "cat-file", "blob", objectIDText)
+	content, err := gitOutput(ctx, repo.DiskPath, "cat-file", "blob", objectIDText)
 	if err != nil || !utf8.Valid(content) {
 		fail(c, http.StatusUnsupportedMediaType, 42001, "binary files cannot be previewed")
 		return
@@ -391,6 +513,10 @@ func gitOutput(ctx context.Context, dir string, args ...string) ([]byte, error) 
 	return output, nil
 }
 
+func repositoryGitContext(c *gin.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(c.Request.Context(), 30*time.Second)
+}
+
 func resolveCommit(ctx context.Context, repo model.Repository, ref string) (string, error) {
 	if !validRef(ref) {
 		return "", fmt.Errorf("invalid ref")
@@ -450,6 +576,44 @@ func parseTree(base string, output []byte) ([]treeEntry, error) {
 		entries = append(entries, treeEntry{Name: path.Base(parts[1]), Path: entryPath, Type: metadata[1], OID: metadata[2], Mode: metadata[0]})
 	}
 	return entries, nil
+}
+
+func parseRefs(output []byte) ([]refEntry, error) {
+	refs := make([]refEntry, 0)
+	for _, record := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if record == "" {
+			continue
+		}
+		parts := strings.SplitN(record, "\x00", 4)
+		if len(parts) != 4 || (len(parts[1]) != 40 && len(parts[1]) != 64) {
+			return nil, fmt.Errorf("malformed git reference")
+		}
+		name, kind := parts[0], "tag"
+		if strings.HasPrefix(name, "refs/heads/") {
+			name, kind = strings.TrimPrefix(name, "refs/heads/"), "branch"
+		} else if strings.HasPrefix(name, "refs/tags/") {
+			name = strings.TrimPrefix(name, "refs/tags/")
+		} else {
+			return nil, fmt.Errorf("unexpected git reference namespace")
+		}
+		refs = append(refs, refEntry{Ref: parts[0], Name: name, OID: parts[1], Kind: kind, Subject: parts[3]})
+	}
+	return refs, nil
+}
+
+func parseCommits(output []byte) ([]commitEntry, error) {
+	commits := make([]commitEntry, 0)
+	for _, record := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if record == "" {
+			continue
+		}
+		parts := strings.SplitN(record, "\x00", 4)
+		if len(parts) != 4 || (len(parts[0]) != 40 && len(parts[0]) != 64) {
+			return nil, fmt.Errorf("malformed git commit")
+		}
+		commits = append(commits, commitEntry{Hash: parts[0], Author: parts[1], CommittedAt: parts[2], Subject: parts[3]})
+	}
+	return commits, nil
 }
 
 func view(repo model.Repository, projectName string) repositoryView {

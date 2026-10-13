@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -120,6 +122,43 @@ func TestProjectAndWorkItemAPIsAreWorkspaceScoped(t *testing.T) {
 	if !strings.Contains(string(readmeResponse.Data), "Repository for project delivery") {
 		t.Fatal("new repository did not return its initial README contents")
 	}
+	refsResponse := postTestAPI(t, router, "/api/v1/repository/query/refs", fmt.Sprintf(`{"repositoryId":%d}`, repositoryData.ID), firstCookie, "", "")
+	if !strings.Contains(string(refsResponse.Data), `"name":"main"`) || !strings.Contains(string(refsResponse.Data), `"kind":"branch"`) {
+		t.Fatalf("repository refs did not include main: %s", refsResponse.Data)
+	}
+	historyResponse := postTestAPI(t, router, "/api/v1/repository/query/commits", fmt.Sprintf(`{"repositoryId":%d,"ref":"main"}`, repositoryData.ID), firstCookie, "", "")
+	if !strings.Contains(string(historyResponse.Data), "Initial commit") {
+		t.Fatalf("repository history did not include its initial commit: %s", historyResponse.Data)
+	}
+	diffResponse := postTestAPI(t, router, "/api/v1/repository/query/diff", fmt.Sprintf(`{"repositoryId":%d,"baseRef":"main","compareRef":"main"}`, repositoryData.ID), firstCookie, "", "")
+	if !strings.Contains(string(diffResponse.Data), `"diff":""`) {
+		t.Fatalf("same-ref repository diff should be empty: %s", diffResponse.Data)
+	}
+	var storedRepository model.Repository
+	if err := db.First(&storedRepository, repositoryData.ID).Error; err != nil {
+		t.Fatalf("load initialized repository for Git integration: %v", err)
+	}
+	clonePath := t.TempDir()
+	runGitTestCommand(t, "clone", storedRepository.DiskPath, clonePath)
+	runGitTestCommand(t, "-C", clonePath, "checkout", "-b", "feature/test")
+	if err := os.WriteFile(filepath.Join(clonePath, "feature.txt"), []byte("feature branch content\n"), 0600); err != nil {
+		t.Fatalf("write feature branch file: %v", err)
+	}
+	runGitTestCommand(t, "-C", clonePath, "add", "--", "feature.txt")
+	runGitTestCommand(t, "-C", clonePath, "-c", "user.name=Tenant Test", "-c", "user.email=test@example.test", "-c", "commit.gpgsign=false", "commit", "-m", "Add feature")
+	runGitTestCommand(t, "-C", clonePath, "push", "origin", "HEAD:refs/heads/feature/test")
+	refsResponse = postTestAPI(t, router, "/api/v1/repository/query/refs", fmt.Sprintf(`{"repositoryId":%d}`, repositoryData.ID), firstCookie, "", "")
+	if !strings.Contains(string(refsResponse.Data), `"name":"feature/test"`) {
+		t.Fatalf("repository refs omitted feature branch: %s", refsResponse.Data)
+	}
+	historyResponse = postTestAPI(t, router, "/api/v1/repository/query/commits", fmt.Sprintf(`{"repositoryId":%d,"ref":"refs/heads/feature/test"}`, repositoryData.ID), firstCookie, "", "")
+	if !strings.Contains(string(historyResponse.Data), "Add feature") || !strings.Contains(string(historyResponse.Data), "Initial commit") {
+		t.Fatalf("feature branch history was incomplete: %s", historyResponse.Data)
+	}
+	diffResponse = postTestAPI(t, router, "/api/v1/repository/query/diff", fmt.Sprintf(`{"repositoryId":%d,"baseRef":"main","compareRef":"refs/heads/feature/test"}`, repositoryData.ID), firstCookie, "", "")
+	if !strings.Contains(string(diffResponse.Data), "+feature branch content") {
+		t.Fatalf("feature branch diff omitted its added file: %s", diffResponse.Data)
+	}
 
 	otherProjects := postTestAPI(t, router, "/api/v1/project/query/page", `{"page":1,"size":20,"filters":{}}`, secondCookie, "", "")
 	if otherProjects.Total != 0 {
@@ -215,4 +254,13 @@ func postTestRaw(router http.Handler, path, body string, cookie *http.Cookie, wo
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	return response
+}
+
+func runGitTestCommand(t *testing.T, args ...string) {
+	t.Helper()
+	command := exec.Command("git", args...)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v: %s", args, err, output)
+	}
 }

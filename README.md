@@ -9,7 +9,7 @@ NCode 是一个中文项目协作与交付平台。当前实现依据所提供�
 - 用户可创建和查看工作区内可见的项目，填写目标、标识和类型，并查看按工作项状态计算的进度。
 - 用户可创建和编辑工作项，维护负责人、优先级、截止日期、验收清单和变更历史。工作项可在待处理、就绪、进行中、待评审、待验收和已验收之间流转。
 - 验收前必须勾选当前验收清单的每一项。更新请求携带 `expectedVersion`；过期写入返回 HTTP 409。项目和工作项创建支持 `Idempotency-Key` 重放。
-- 用户可在项目下创建私有 Git 仓库。系统会在配置的本地对象存储中初始化 `main` 分支和 README 首次提交，并提供工作区权限保护的目录及 UTF-8 文本浏览。文件预览上限为 1 MiB。
+- 用户可在项目下创建私有 Git 仓库。系统会在配置的本地对象存储中初始化 `main` 分支和 README 首次提交，并提供工作区权限保护的分支/标签切换、提交历史、目录及 UTF-8 文本浏览；文件预览上限为 1 MiB。
 - 桌面与移动端宽度使用同一套界面。
 
 项目进度按工作项状态计算：待处理或已取消为 0%，就绪为 20%，进行中为 50%，待评审为 75%，待业务验收为 90%，已验收为 100%，然后对项目内工作项取平均。没有工作项的项目显示 0%。
@@ -90,6 +90,6 @@ make build
 - 工作区：`POST /api/v1/workspace/create`、`workspace/invite/create`、`workspace/invite/accept`、`workspace/invite/revoke`
 - 项目：`POST /api/v1/project/create`、`project/query/page`、`project/query/one`
 - 工作项：`POST /api/v1/workItem/create`、`workItem/update`、`workItem/transition`、`workItem/accept`、`workItem/query/page`、`workItem/query/activity`
-- 仓库：`POST /api/v1/repository/create`、`repository/query/page`、`repository/query/tree`、`repository/query/file`
+- 仓库：`POST /api/v1/repository/create`、`repository/query/page`、`repository/query/refs`、`repository/query/commits`、`repository/query/diff`、`repository/query/tree`、`repository/query/file`
 - 保护的业务 API 需要会话 Cookie；`X-Workspace-ID` 用于选择工作区，服务端会验证用户的有效成员关系。
 - 健康检查：`GET /healthz`

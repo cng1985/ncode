@@ -12,14 +12,19 @@ const error = ref('')
 const createDialog = ref(false)
 const creating = ref(false)
 const activeRepository = ref(null)
+const refs = ref([])
+const selectedRef = ref('')
 const currentPath = ref('')
 const entries = ref([])
 const selectedFile = ref(null)
 const browserBusy = ref(false)
+const historyOpen = ref(false)
+const history = ref([])
 const form = reactive({ projectId: null, name: '', slug: '', visibility: 'private' })
 
 const breadcrumbs = computed(() => currentPath.value ? currentPath.value.split('/').map((name, index, parts) => ({ name, path: parts.slice(0, index + 1).join('/') })) : [])
 const activeProjectName = computed(() => props.projects.find((project) => project.id === activeRepository.value?.projectId)?.name || activeRepository.value?.projectName || '')
+const selectedRefName = computed(() => refs.value.find((ref) => ref.ref === selectedRef.value)?.name || selectedRef.value)
 
 function slugFor(value) {
   const slug = value.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
@@ -73,14 +78,31 @@ async function openRepository(repository) {
   activeRepository.value = repository
   currentPath.value = ''
   selectedFile.value = null
+  refs.value = []
+  history.value = []
+  selectedRef.value = repository.defaultBranch
+  try {
+    refs.value = (await api.repositoryRefs(repository.id)).data.refs
+    selectedRef.value = refs.value.find((ref) => ref.kind === 'branch' && ref.name === repository.defaultBranch)?.ref || repository.defaultBranch
+  } catch (cause) {
+    ElMessage.error(cause.message)
+  }
   await loadTree('')
+  if (historyOpen.value) await loadHistory()
+}
+
+async function changeRef() {
+  selectedFile.value = null
+  history.value = []
+  await loadTree('')
+  if (historyOpen.value) await loadHistory()
 }
 
 async function loadTree(path) {
   if (!activeRepository.value) return
   browserBusy.value = true
   try {
-    const result = await api.repositoryTree(activeRepository.value.id, path, activeRepository.value.defaultBranch)
+    const result = await api.repositoryTree(activeRepository.value.id, path, selectedRef.value || activeRepository.value.defaultBranch)
     currentPath.value = result.data.path
     entries.value = result.data.entries
   } catch (cause) {
@@ -88,6 +110,23 @@ async function loadTree(path) {
   } finally {
     browserBusy.value = false
   }
+}
+
+async function loadHistory() {
+  if (!activeRepository.value) return
+  browserBusy.value = true
+  try {
+    history.value = (await api.repositoryCommits(activeRepository.value.id, selectedRef.value || activeRepository.value.defaultBranch)).data.commits
+  } catch (cause) {
+    ElMessage.error(cause.message)
+  } finally {
+    browserBusy.value = false
+  }
+}
+
+async function toggleHistory() {
+  historyOpen.value = !historyOpen.value
+  if (historyOpen.value) await loadHistory()
 }
 
 async function openEntry(entry) {
@@ -98,7 +137,7 @@ async function openEntry(entry) {
   }
   browserBusy.value = true
   try {
-    selectedFile.value = (await api.repositoryFile(activeRepository.value.id, entry.path, activeRepository.value.defaultBranch)).data
+    selectedFile.value = (await api.repositoryFile(activeRepository.value.id, entry.path, selectedRef.value || activeRepository.value.defaultBranch)).data
   } catch (cause) {
     ElMessage.error(cause.message)
   } finally {
@@ -144,8 +183,11 @@ onMounted(loadRepositories)
           <el-tag effect="plain">{{ activeRepository.state === 'active' ? '可用' : '初始化中' }}</el-tag>
         </header>
         <div class="repository-toolbar">
-          <span class="repository-branch"><span class="branch-glyph">⑂</span>{{ activeRepository.defaultBranch }}</span>
-          <span class="repository-readonly">当前提供受权限保护的只读浏览</span>
+          <el-select v-model="selectedRef" class="repository-ref-select" size="small" aria-label="选择分支或标签" @change="changeRef">
+            <el-option v-for="ref in refs" :key="ref.ref" :label="`${ref.kind === 'branch' ? '分支' : '标签'} · ${ref.name}`" :value="ref.ref" />
+          </el-select>
+          <button class="repository-history-toggle" :class="{ active: historyOpen }" @click="toggleHistory">{{ historyOpen ? '隐藏提交' : '提交历史' }}</button>
+          <span class="repository-readonly">受权限保护的只读浏览</span>
         </div>
         <div class="repository-browser" v-loading="browserBusy">
           <div class="repository-tree-pane">
@@ -163,9 +205,20 @@ onMounted(loadRepositories)
           </div>
           <div class="repository-file-pane">
             <template v-if="selectedFile"><div class="file-preview-heading"><el-icon><Document /></el-icon><strong>{{ selectedFile.path }}</strong><small>{{ selectedFile.size.toLocaleString() }} bytes</small></div><pre class="file-preview">{{ selectedFile.content }}</pre></template>
-            <div v-else class="repository-file-hint"><el-icon><Document /></el-icon><strong>选择文件以查看内容</strong><span>文件浏览固定到 {{ activeRepository.defaultBranch }} 分支。</span></div>
+            <div v-else class="repository-file-hint"><el-icon><Document /></el-icon><strong>选择文件以查看内容</strong><span>当前版本：{{ selectedRefName }}。</span></div>
           </div>
         </div>
+        <section v-if="historyOpen" class="repository-history" aria-label="提交历史">
+          <h3>提交历史 <span>{{ selectedRefName }}</span></h3>
+          <div v-if="history.length" class="repository-commit-list">
+            <article v-for="commit in history" :key="commit.hash" class="repository-commit">
+              <span class="commit-mark"></span>
+              <div><strong>{{ commit.subject || '（无提交说明）' }}</strong><small>{{ commit.author }} · {{ new Date(commit.committedAt).toLocaleString() }}</small></div>
+              <code>{{ commit.hash.slice(0, 8) }}</code>
+            </article>
+          </div>
+          <p v-else-if="!browserBusy" class="repository-empty-tree">暂无提交记录。</p>
+        </section>
       </template>
       <div v-else-if="!loading" class="repository-welcome"><span class="repository-welcome-mark"><el-icon><Folder /></el-icon></span><h2>代码仓库</h2><p>从项目创建一个仓库，开始整理可追溯的代码交付。</p><el-button v-if="projects.length" type="primary" @click="openCreate">新建仓库</el-button><el-button v-else type="primary" @click="emit('create-project')">先创建项目</el-button></div>
     </section>
