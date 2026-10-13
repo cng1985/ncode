@@ -57,12 +57,17 @@ func registerMigrations(lifecycle fx.Lifecycle, db *gorm.DB, cfg config.Config) 
 				&model.AcceptanceCriterion{},
 				&model.Activity{},
 				&model.IdempotencyRecord{},
+				&model.SystemService{},
+				&model.ServiceLog{},
 			); err != nil {
 				return fmt.Errorf("run database migrations: %w", err)
 			}
 			if cfg.SeedDemo {
 				if err := model.SeedDemo(db); err != nil {
 					return fmt.Errorf("seed demonstration data: %w", err)
+				}
+				if err := model.SeedServices(db); err != nil {
+					return fmt.Errorf("seed demonstration services: %w", err)
 				}
 			}
 			return nil

@@ -1,21 +1,29 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Bell, Briefcase, CircleCheck, Close, Connection, Document, Folder, House, Plus, Reading, Search, User } from '@element-plus/icons-vue'
+import { Bell, Briefcase, CircleCheck, Close, Connection, Document, Folder, House, Monitor, Plus, Reading, Search, User } from '@element-plus/icons-vue'
 import { api } from './api'
 import WorkbenchView from './components/WorkbenchView.vue'
 import ProjectView from './components/ProjectView.vue'
+import ServiceView from './components/ServiceView.vue'
 import ModulePlaceholder from './components/ModulePlaceholder.vue'
 
 const navItems = [
   { label: '工作台', icon: House },
   { label: '项目', icon: Folder },
+  { label: '服务', icon: Monitor },
   { label: '仓库', icon: Connection },
   { label: '学习', icon: Reading },
   { label: '作品', icon: Document },
   { label: '机会', icon: Briefcase },
 ]
-const mobileNav = [...navItems.slice(0, 4), { label: '我的', icon: User }]
+const mobileNav = [
+  { label: '工作台', icon: House },
+  { label: '项目', icon: Folder },
+  { label: '服务', icon: Monitor },
+  { label: '学习', icon: Reading },
+  { label: '我的', icon: User },
+]
 const projects = ref([])
 const workItems = ref([])
 const activities = ref([])
@@ -277,7 +285,7 @@ onMounted(refresh)
         <div class="mobile-brand"><span class="brand-symbol">N</span><span>NCode</span></div>
         <div class="topbar-title"><h2>{{ activeView }}</h2><span v-if="activeView === '工作台'">{{ dateHeading }}</span></div>
         <div class="topbar-tools">
-          <el-input v-model="search" class="global-search" placeholder="搜索项目、工作项" clearable aria-label="搜索项目和工作项">
+          <el-input v-model="search" class="global-search" :placeholder="activeView === '服务' ? '搜索服务名称或命令' : '搜索项目、工作项'" clearable :aria-label="activeView === '服务' ? '搜索服务' : '搜索项目和工作项'">
             <template #prefix><el-icon><Search /></el-icon></template>
           </el-input>
           <el-popover placement="bottom-end" :width="230" trigger="click">
@@ -305,11 +313,12 @@ onMounted(refresh)
         @select="selectedProjectId = $event" @create-project="openProjectDialog"
         @create-work-item="openCreateWorkItem" @open-item="openItem"
       />
+      <ServiceView v-else-if="activeView === '服务'" :search="search" />
       <ModulePlaceholder v-else :title="activeView" />
     </div>
 
     <nav class="mobile-nav" aria-label="移动端主导航">
-      <button v-for="item in mobileNav" :key="item.label" :class="{ active: activeView === item.label || (item.label === '我的' && !['工作台', '项目', '仓库', '学习'].includes(activeView)) }" @click="setView(item.label)">
+      <button v-for="item in mobileNav" :key="item.label" :class="{ active: activeView === item.label || (item.label === '我的' && !['工作台', '项目', '服务', '学习'].includes(activeView)) }" @click="setView(item.label)">
         <el-icon><component :is="item.icon" /></el-icon><span>{{ item.label }}</span>
       </button>
     </nav>

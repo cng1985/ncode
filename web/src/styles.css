@@ -94,6 +94,7 @@ h1, h2, h3, p { margin-top: 0; }
 .status-review { color: var(--orange); }
 .status-acceptance { color: var(--purple); }
 .status-done { color: var(--green); }
+.status-failed { color: #b42318; }
 .status-default { color: #667085; }
 .due-cell { color: #3e495b !important; font-size: 13px !important; white-space: nowrap; }
 .table-action { color: #9ba4b2 !important; text-align: right; }
@@ -167,6 +168,31 @@ h1, h2, h3, p { margin-top: 0; }
 .project-empty span { max-width: 320px; font-size: 13px; line-height: 1.6; }
 .project-loading { height: 240px; }
 .select-project-hint { min-height: 300px; display: grid; place-items: center; color: #8792a3; font-size: 14px; }
+.service-layout { min-height: calc(100vh - 80px); display: grid; grid-template-columns: minmax(320px, 38%) minmax(0, 1fr); }
+.service-list-pane { min-width: 0; padding: 40px 26px 80px 36px; border-right: 1px solid var(--line); }
+.service-list { display: flex; flex-direction: column; }
+.service-row { width: 100%; display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 13px; padding: 16px 10px; border: 0; border-bottom: 1px solid var(--line); background: #fff; text-align: left; cursor: pointer; }
+.service-row:hover, .service-row.selected { background: #fafbfe; }
+.service-row.selected { box-shadow: inset 3px 0 var(--blue); }
+.service-mark { width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid #e8ebf1; border-radius: 9px; background: #fafbfd; color: #5d6b82; font-size: 13px; font-weight: 680; }
+.service-mark.status-progress { color: #2462e8; background: #f3f7ff; }
+.service-mark.status-failed { color: #b42318; background: #fff6f5; }
+.service-detail-pane { min-width: 0; display: flex; flex-direction: column; padding: 43px 32px 28px; }
+.service-actions { display: flex; flex: 0 0 auto; gap: 8px; }
+.service-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 4px 0 18px; color: #8490a2; font-size: 12px; }
+.service-log-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.service-log-heading h3 { margin: 0; color: #263246; font-size: 15px; font-weight: 640; }
+.service-log-heading .inline-link { display: inline-flex; align-items: center; gap: 4px; }
+.service-log { flex: 1; min-height: 320px; max-height: calc(100vh - 280px); overflow: auto; padding: 14px 16px; border-radius: 10px; background: #121820; color: #d5deea; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.7; }
+.log-line { display: grid; grid-template-columns: 96px 42px minmax(0, 1fr); gap: 10px; }
+.log-line time { color: #7f8b9c; }
+.log-stream { color: #8fb4ff; }
+.log-stderr .log-stream { color: #f0a3a0; }
+.log-system .log-stream { color: #e3c07a; }
+.log-message { white-space: pre-wrap; word-break: break-word; }
+.log-placeholder { grid-template-columns: 1fr; color: #9aa6b6; }
+.service-inline-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 14px 0; color: #9b4037; font-size: 13px; }
+.form-hint { margin: 0 0 12px; color: #8b95a4; font-size: 12px; line-height: 1.6; }
 .module-placeholder { max-width: 620px; min-height: calc(100vh - 80px); display: flex; flex-direction: column; align-items: flex-start; justify-content: center; margin: auto; padding: 50px 40px; }
 .placeholder-mark { width: 48px; height: 48px; display: grid; place-items: center; margin-bottom: 24px; border: 1px solid var(--line); border-radius: 12px; color: #5574b6; font-size: 22px; }
 .module-placeholder h1 { margin-bottom: 10px; font-size: 27px; letter-spacing: -.4px; }
@@ -294,6 +320,12 @@ h1, h2, h3, p { margin-top: 0; }
   .detail-title-row h2 { font-size: 18px; }
   .detail-title-row p { font-size: 12px; }
   .detail-title-row .text-action { white-space: nowrap; font-size: 11px; }
+  .service-layout { display: block; min-height: auto; }
+  .service-list-pane { padding: 28px 22px 12px; border-right: 0; }
+  .service-detail-pane { min-height: auto; padding: 8px 22px 36px; }
+  .service-log { max-height: 420px; }
+  .service-actions { flex-wrap: wrap; }
+  .detail-title-row .service-actions { margin-top: 8px; }
   .module-placeholder { min-height: calc(100vh - 145px); padding: 32px 26px; }
   .module-placeholder h1 { font-size: 24px; }
   .error-banner { align-items: flex-start; margin: 13px 16px 0; padding: 10px 12px; font-size: 12px; }

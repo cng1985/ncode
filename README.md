@@ -8,6 +8,7 @@ NCode is a Chinese-language project collaboration and delivery platform. This fi
 - Create and edit work items with an owner, priority, due date, acceptance checklist, and change history.
 - Move work through backlog, ready, in progress, review, acceptance, and accepted states.
 - Require every current acceptance criterion to be checked before accepting a work item. Writes carry `expectedVersion`; stale writes return HTTP 409. Project and work-item creation support `Idempotency-Key` replay.
+- Register system services, start and stop them, and read captured logs. Built-in heartbeat and one-shot services are seeded for local demonstration. A process service executes one program with arguments and no shell. Shells and host power or service-control commands are rejected. Child processes inherit the API environment, so only register commands you trust. The API remains loopback-only.
 - Use the same interface on desktop and mobile widths.
 
 The dashboard's project progress is derived from work-item states: backlog/canceled 0%, ready 20%, in progress 50%, review 75%, pending business acceptance 90%, accepted 100%, averaged across the project's items. An empty project shows 0%.
@@ -85,4 +86,5 @@ Available routes include:
 - `POST /api/v1/project/create`, `project/query/page`, `project/query/one`
 - `POST /api/v1/workItem/create`, `workItem/update`, `workItem/transition`, `workItem/accept`
 - `POST /api/v1/workItem/query/page`, `workItem/query/activity`
+- `POST /api/v1/service/create`, `service/query/page`, `service/query/one`, `service/start`, `service/stop`, `service/query/logs`
 - `GET /healthz`

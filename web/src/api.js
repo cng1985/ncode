@@ -33,4 +33,10 @@ export const api = {
   transitionWorkItem: (body) => post('workItem/transition', body, { idempotencyKey: crypto.randomUUID() }),
   acceptWorkItem: (body) => post('workItem/accept', body, { idempotencyKey: crypto.randomUUID() }),
   activity: (workItemId) => post('workItem/query/activity', { workItemId }),
+  services: (page = 1) => post('service/query/page', { page, size: 100, filters: {} }),
+  service: (id) => post('service/query/one', { id }),
+  createService: (body) => post('service/create', body, { idempotencyKey: crypto.randomUUID() }),
+  startService: (body) => post('service/start', body),
+  stopService: (body) => post('service/stop', body),
+  serviceLogs: (serviceId, afterId = 0) => post('service/query/logs', { serviceId, afterId, size: 300 }),
 }
