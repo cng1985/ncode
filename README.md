@@ -31,6 +31,8 @@ The application reads server and PostgreSQL settings from configs/config.yaml. S
 
 The checked-in YAML contains credentials for the loopback-only Compose database and is for local development only. Keep real deployment credentials outside version control.
 
+For a private PostgreSQL instance, put its JDBC URL and username in the ignored configs/config.local.yaml file, leave its password out of the file, set DATABASE_PASSWORD through the environment's secret settings, and launch with CONFIG_FILE=configs/config.local.yaml. API startup runs GORM AutoMigrate, so only start it against a database when schema changes are intended.
+
 ## Start locally
 
 Start PostgreSQL and Redis from the repository root:

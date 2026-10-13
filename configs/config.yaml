@@ -4,9 +4,6 @@ server:
   seed_demo: true
 
 database:
-  host: 127.0.0.1
-  port: 54329
-  user: ncode
+  url: postgres://127.0.0.1:54329/ncode?sslmode=disable
+  username: ncode
   password: ncode_local_dev
-  name: ncode
-  ssl_mode: disable

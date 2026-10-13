@@ -27,12 +27,10 @@ type fileConfig struct {
 		SeedDemo    *bool  `yaml:"seed_demo"`
 	} `yaml:"server"`
 	Database struct {
-		Host     string `yaml:"host"`
-		Port     int    `yaml:"port"`
+		URL      string `yaml:"url"`
+		Username string `yaml:"username"`
 		User     string `yaml:"user"`
 		Password string `yaml:"password"`
-		Name     string `yaml:"name"`
-		SSLMode  string `yaml:"ssl_mode"`
 	} `yaml:"database"`
 }
 
@@ -109,38 +107,42 @@ func Load() (Config, error) {
 }
 
 func (database fileConfig) databaseURL(passwordOverride string) (string, error) {
-	host := strings.TrimSpace(database.Database.Host)
-	user := strings.TrimSpace(database.Database.User)
-	name := strings.TrimSpace(database.Database.Name)
-	sslMode := strings.TrimSpace(database.Database.SSLMode)
-	port := database.Database.Port
-
-	switch {
-	case host == "":
-		return "", fmt.Errorf("database.host is required")
-	case port < 1 || port > 65535:
-		return "", fmt.Errorf("database.port must be between 1 and 65535")
-	case user == "":
-		return "", fmt.Errorf("database.user is required")
-	case name == "":
-		return "", fmt.Errorf("database.name is required")
-	case sslMode == "":
-		return "", fmt.Errorf("database.ssl_mode is required")
+	rawURL := strings.TrimSpace(database.Database.URL)
+	if strings.HasPrefix(rawURL, "jdbc:") {
+		rawURL = strings.TrimPrefix(rawURL, "jdbc:")
+	}
+	dsn, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("database.url is invalid: %w", err)
+	}
+	if dsn.Scheme != "postgres" && dsn.Scheme != "postgresql" {
+		return "", fmt.Errorf("database.url must use the postgres or jdbc:postgresql scheme")
+	}
+	if dsn.Hostname() == "" || strings.Trim(dsn.Path, "/") == "" {
+		return "", fmt.Errorf("database.url must include a host and database name")
+	}
+	if portText := dsn.Port(); portText != "" {
+		port, err := strconv.Atoi(portText)
+		if err != nil || port < 1 || port > 65535 {
+			return "", fmt.Errorf("database.url port must be between 1 and 65535")
+		}
 	}
 
 	password := database.Database.Password
 	if passwordOverride != "" {
 		password = passwordOverride
 	}
-	dsn := &url.URL{
-		Scheme: "postgres",
-		User:   url.UserPassword(user, password),
-		Host:   net.JoinHostPort(host, strconv.Itoa(port)),
-		Path:   name,
+	username := strings.TrimSpace(database.Database.Username)
+	if username == "" {
+		username = strings.TrimSpace(database.Database.User)
 	}
-	query := dsn.Query()
-	query.Set("sslmode", sslMode)
-	dsn.RawQuery = query.Encode()
+	if username != "" {
+		dsn.User = url.UserPassword(username, password)
+	} else if dsn.User == nil {
+		return "", fmt.Errorf("database.username is required")
+	} else if passwordOverride != "" {
+		dsn.User = url.UserPassword(dsn.User.Username(), password)
+	}
 	return dsn.String(), nil
 }
 

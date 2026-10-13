@@ -126,8 +126,8 @@ func TestLoadRejectsInvalidDatabasePort(t *testing.T) {
 	resetEnvironment(t)
 	lines := validConfigLines()
 	for i := range lines {
-		if lines[i] == "  port: 5432" {
-			lines[i] = "  port: 70000"
+		if strings.HasPrefix(lines[i], "  url:") {
+			lines[i] = "  url: jdbc:postgresql://db.example:70000/ncode_test"
 		}
 	}
 	t.Setenv("CONFIG_FILE", writeConfig(t, lines...))
@@ -158,12 +158,9 @@ func validConfigLines() []string {
 		"  environment: development",
 		"  seed_demo: true",
 		"database:",
-		"  host: db.example",
-		"  port: 5432",
-		"  user: ncode_app",
+		"  url: jdbc:postgresql://db.example:5432/ncode_test?sslmode=require",
+		"  username: ncode_app",
 		"  password: 'p@ss:word'",
-		"  name: ncode_test",
-		"  ssl_mode: require",
 	}
 }
 
